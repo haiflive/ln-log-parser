@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        // {
+        //     "type": "node",
+        //     "protocol": "auto",
+        //     "request": "attach",
+        //     "name": "Attach to Process",
+        //     "address": "localhost",
+        //     "port": 9229
+        // }
+        {
+            "type": "node",
+            "protocol": "auto",
+            "request": "attach",
+            "name": "Attach to Process",
+            "address": "localhost",
+            "port": 9229
+        }
+    ]
+}
