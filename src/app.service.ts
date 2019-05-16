@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as es from 'event-stream';
 import * as redis from 'redis';
+import * as _ from 'lodash';
 
 
 @Injectable()
@@ -13,7 +14,7 @@ export class AppService {
   protected is_process_started: boolean;
   protected line_number: number;
   protected data_stack: any[];
-  protected domain_list: any;
+  protected domain_zone_list: any;
   protected readonly _db: DbAbstract;
   protected client:any;
   protected getAsync: any;
@@ -34,7 +35,7 @@ export class AppService {
     this.is_process_started = false;
     this.line_number = 0;
     this.data_stack = [];
-    this.domain_list = {};
+    this.domain_zone_list = {};
 
     this.setupDomainList();
     // this.startProcess(); // debug autostart
@@ -64,9 +65,9 @@ export class AppService {
     var s = fs.createReadStream('1.sql')
       .pipe(es.split())
       .pipe(es.mapSync(async function(line) {
-          me.line_number += 1; // 14162106
+          me.line_number += 1; // 14202520
           // skip first 30 lines
-          if(me.line_number < 9411764) // 31) // skip imported
+          if(me.line_number < 31) // skip imported
             return; // continue
           
           // pause the readstream
@@ -106,8 +107,11 @@ export class AppService {
     try {
       // check exists domain, add if not exists create
       let email_parts = result_values[1].split('@');
-      let domain_zone: number = await this.getDomainId(email_parts[1]);
-      result_values.push(domain_zone.toString());
+      let domain_zone = email_parts[1].split('.');
+      let domain_id: number = await this.getDomainId(email_parts[1]);
+      let domain_zone_id: number = await this.getDomainZoneId(_.last(domain_zone));
+      result_values.push(domain_id.toString());
+      result_values.push(domain_zone_id.toString());
 
       // pass data into stack
       this.data_stack.push(result_values);
@@ -128,7 +132,7 @@ export class AppService {
       this.data_stack = []; // flush stack
       try {
         let results = await this._db.query(
-          'INSERT IGNORE INTO `idemail` (`id`, `email`, `domain_id`) '
+          'INSERT IGNORE INTO `idemail` (`id`, `email`, `domain_id`, `zone_id`) '
           + ' VALUES ?',
           [data_to_save]
         );
@@ -153,11 +157,29 @@ export class AppService {
     } catch(e) {
       debugger;
     }
+    
+    try {
+      // load full domain list to redis
+      let results2: any[] = await this._db.query(
+        'SELECT id, name FROM `domain_zone`' // LIMIT 100
+      );
+
+      for(let i = 0; i < results2.length; i++) {
+        this.domain_zone_list[results2[i].name] = results2[i].id;
+      }
+    } catch(e) {
+      debugger;
+    }
 
     // test redis search domain
     let domain_id: number = await this.getDomainId('gmail.com');
 
     console.log(domain_id);
+
+    // test redis domain zone
+    let domain_zone_id: number = await this.getDomainZoneId('com');
+
+    console.log(domain_zone_id);
 
     console.log('Domain list ready');
   }
@@ -190,6 +212,36 @@ export class AppService {
     }
 
     return +domain_id;
+  }
+
+  /**
+   * create domain zone if not exists
+   * @param domain_zone
+   */
+  protected async getDomainZoneId(domain_zone: string): Promise<number> {
+    // get data from redis
+    let domain_zone_id = this.domain_zone_list[domain_zone];
+
+    // if empty create it
+    if(!domain_zone_id) {
+      try {
+        let results = await this._db.query(
+          'INSERT IGNORE INTO `domain_zone` (`name`) '
+          + ' VALUES ?',
+          [[[domain_zone]]]
+        );
+
+        // console.log(results.insertId); // 
+        // store new domain to redis
+        this.domain_zone_list[domain_zone] = results.insertId;
+        domain_zone_id = results.insertId;
+      } catch(e) {
+        console.log(e);
+        debugger;
+      }
+    }
+
+    return +domain_zone_id;
   }
 
   protected handleError(err) {
